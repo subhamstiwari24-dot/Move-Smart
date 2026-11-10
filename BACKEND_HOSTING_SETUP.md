@@ -92,31 +92,44 @@ DEMO_RESET_ENABLED=false
 If deploying to AWS ECS, Google Cloud Run, DigitalOcean App Platform, or Kubernetes, save the following as `backend/Dockerfile`:
 
 ```dockerfile
-# Stage 1: Build JAR using Maven
-FROM maven:3.9.9-eclipse-temurin-21 AS builder
-WORKDIR /app
+# Multi-stage Docker build for MoveSmart Spring Boot REST API
+
+FROM eclipse-temurin:21-jdk-alpine AS builder
+
+WORKDIR /build
+
+# Install Maven
+RUN apk add --no-cache maven
+
+# Copy Maven project files
 COPY pom.xml .
-RUN mvn dependency:go-offline -B
 COPY src ./src
+
+# Build Spring Boot application
 RUN mvn clean package -DskipTests
 
-# Stage 2: Minimal Distroless / JRE Runtime
+# Runtime stage
 FROM eclipse-temurin:21-jre-alpine
+
 WORKDIR /app
 
-# Create non-root user and persistent upload directory
+# Create non-root security user and prepare upload storage directory
 RUN addgroup -S movesmart && adduser -S movesmart -G movesmart \
-    && mkdir -p /app/uploads && chown -R movesmart:movesmart /app
+    && mkdir -p /app/uploads \
+    && chown -R movesmart:movesmart /app
 
-USER movesmart
+# Copy compiled JAR
+COPY --from=builder --chown=movesmart:movesmart /build/target/*.jar app.jar
 
-COPY --from=builder /app/target/movesmart-backend-0.0.1-SNAPSHOT.jar app.jar
-
+# Runtime configuration
 ENV PORT=8080
 ENV SPRING_PROFILES_ACTIVE=prod
+
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
+USER movesmart:movesmart
+
+ENTRYPOINT ["sh", "-c", "java -Djava.security.egd=file:/dev/./urandom -jar app.jar --server.port=${PORT:-8080}"]
 ```
 
 ---
